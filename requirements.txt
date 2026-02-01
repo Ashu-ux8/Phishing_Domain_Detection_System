@@ -1,0 +1,13 @@
+Flask
+numpy
+pytz
+joblib
+scikit-learn # Required for joblib to load the model if it was saved with scikit-learn's joblib
+requests
+python-whois # The 'whois' library
+tldextract
+ipwhois
+dnspython # For dns.resolver
+certifi
+xgboost
+gunicorn # For production web server

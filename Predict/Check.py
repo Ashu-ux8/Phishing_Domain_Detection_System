@@ -1,5 +1,6 @@
 from urllib.parse import urlparse, parse_qs
 import requests
+from sklearn import logger
 import whois
 import time
 import tldextract
@@ -33,7 +34,7 @@ def get_asn(url):
         domain = urlparse(url).hostname
 
         # Resolve the domain to its IP address
-        ip_address = socket.gethostbyname(domain)
+        ip_address = socket.gethostbyname(domain, timeout=5)
 
         # Query the WHOIS database for the IP address
         obj = IPWhois(ip_address)
@@ -47,6 +48,8 @@ def get_asn(url):
         
         return -1
     
+
+    
 def calculate_time_activation(domain):
     try:
         domain_info = whois.whois(domain)
@@ -54,7 +57,11 @@ def calculate_time_activation(domain):
         if isinstance(creation_date, list):
             creation_date = creation_date[0]
         if creation_date is not None:
-            today = datetime.now()
+            # Make creation_date timezone-naive if it's aware
+            if creation_date.tzinfo is not None and creation_date.tzinfo.utcoffset(creation_date) is not None:
+                creation_date = creation_date.replace(tzinfo=None)
+
+            today = datetime.now() # This is timezone-naive
             activation_days = (today - creation_date).days
             return activation_days
     except Exception as e:
@@ -62,11 +69,20 @@ def calculate_time_activation(domain):
     
     return -1
 
-def calculate_response_time(url):
-    start_time = time.time()
-    response = requests.get(url)
-    end_time = time.time()
-    return end_time - start_time
+def calculate_response_time(url, timeout=5):
+    try:
+        start_time = time.time()
+        response = requests.get(url, timeout=timeout) # Explicit timeout
+        end_time = time.time()
+        return end_time - start_time
+    except requests.exceptions.Timeout:
+        # Handle timeout specifically
+        logger.warning(f"Request to {url} timed out after {timeout} seconds.")
+        return -1 # Return a sentinel value indicating failure
+    except requests.exceptions.RequestException as e:
+        # Handle other request-related errors (e.g., connection errors)
+        logger.error(f"Request to {url} failed: {e}")
+        return -1
 
 def extract_qty_dot_params(query_params):
   
@@ -315,7 +331,25 @@ def extract_featuresS(url):
     try:
         domain = tldextract.extract(parsed_url.netloc)
         whois_info = whois.whois(domain.registered_domain)
-        features['time_domain_expiration'] = (whois_info.expiration_date - whois_info.creation_date).days if whois_info.expiration_date is not None else None
+
+        exp_date = whois_info.expiration_date
+        cre_date = whois_info.creation_date
+
+        if isinstance(exp_date, list): exp_date = exp_date[0]
+        if isinstance(cre_date, list): cre_date = cre_date[0]
+
+        if exp_date is not None and cre_date is not None:
+            # Make dates timezone-naive if they are aware
+            if exp_date.tzinfo is not None and exp_date.tzinfo.utcoffset(exp_date) is not None:
+                exp_date = exp_date.replace(tzinfo=None)
+            if cre_date.tzinfo is not None and cre_date.tzinfo.utcoffset(cre_date) is not None:
+                cre_date = cre_date.replace(tzinfo=None)
+
+            features['time_domain_expiration'] = (exp_date - cre_date).days
+
+        else: 
+            features['time_domain_expiration'] = -1
+    
     except Exception:
         features['time_domain_expiration'] = -1
     
